@@ -28,6 +28,9 @@ concurrency:
   group: stock-analysis
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -512,6 +515,59 @@ jobs:
             reports/
             logs/
           retention-days: 30
+
+      - name: 准备 GitHub Pages 站点
+        if: success()
+        run: |
+          rm -rf public
+          mkdir -p public
+
+          if [ -d "reports" ] && [ "$(ls -A reports 2>/dev/null)" ]; then
+            cp -R reports/. public/
+          fi
+
+          touch public/.nojekyll
+
+          if [ ! -f "public/index.html" ]; then
+            first_html="$(find public -type f \( -name '*.html' -o -name '*.htm' \) | sort | head -n 1)"
+            if [ -n "$first_html" ]; then
+              report_path="${first_html#public/}"
+              cat > public/index.html <<HTML
+          <!doctype html>
+          <html lang="zh-CN">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="refresh" content="0; url=${report_path}">
+            <title>每日股票分析报告</title>
+          </head>
+          <body>
+            <p><a href="${report_path}">打开最新分析报告</a></p>
+          </body>
+          </html>
+          HTML
+            else
+              cat > public/index.html <<'HTML'
+          <!doctype html>
+          <html lang="zh-CN">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>每日股票分析报告</title>
+          </head>
+          <body>
+            <p>本次运行未生成 HTML 报告，请返回 GitHub Actions 查看日志。</p>
+          </body>
+          </html>
+          HTML
+            fi
+          fi
+
+      - name: 上传 GitHub Pages artifact
+        if: success()
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
       
       - name: 显示运行结果
         if: always()
@@ -531,3 +587,21 @@ jobs:
             echo "📜 最近日志（最后 30 行）:"
             tail -30 logs/stock_analysis_*.log 2>/dev/null || echo "无日志"
           fi
+
+  deploy-pages:
+    needs: analyze
+    runs-on: ubuntu-latest
+    if: success()
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: 发布到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
